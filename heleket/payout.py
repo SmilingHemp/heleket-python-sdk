@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from ._constants import API_VERSION
 from ._request_builder import RequestBuilder
 
-_VERSION = "v1"
+_VERSION = API_VERSION
 
 
 class Payout:

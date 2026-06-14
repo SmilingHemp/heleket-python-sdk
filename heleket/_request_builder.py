@@ -18,11 +18,10 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from ._constants import API_URL, DEFAULT_TIMEOUT
 from .exceptions import APIError, AuthenticationError, ConnectionError, ValidationError
 
 logger = logging.getLogger(__name__)
-
-API_URL = "https://api.heleket.com/"
 
 
 class RequestBuilder:

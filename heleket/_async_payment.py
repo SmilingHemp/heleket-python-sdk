@@ -1,10 +1,16 @@
-"""Payment resource — invoice creation, status, history, and webhook verification.
+"""Async Payment resource — invoice creation, status, history, and webhook verification.
 
 Usage::
 
-    from heleket import Client
-    payment = Client.payment(payment_key, merchant_uuid)
-    result  = payment.create({"amount": "15", "currency": "USD", "order_id": "1"})
+    from heleket import AsyncClient
+
+    async with AsyncClient.payment(payment_key, merchant_uuid) as payment:
+        result = await payment.create({"amount": "15", "currency": "USD", "order_id": "1"})
+
+    # or without context manager:
+    payment = AsyncClient.payment(payment_key, merchant_uuid)
+    result = await payment.create({...})
+    await payment.close()
 """
 from __future__ import annotations
 
@@ -15,24 +21,41 @@ import json
 import logging
 from typing import Any
 
+import httpx
+
+from ._async_request_builder import AsyncRequestBuilder
 from ._constants import API_VERSION
-from ._request_builder import RequestBuilder
 
 logger = logging.getLogger(__name__)
 
 _VERSION = API_VERSION
 
 
-class Payment:
-    def __init__(self, payment_key: str, merchant_uuid: str) -> None:
-        self._builder = RequestBuilder(payment_key, merchant_uuid)
+class AsyncPayment:
+    def __init__(
+        self,
+        payment_key: str,
+        merchant_uuid: str,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._builder = AsyncRequestBuilder(payment_key, merchant_uuid, http_client)
         self._payment_key = payment_key
 
-    def services(self, parameters: dict[str, Any] | None = None) -> dict[str, Any] | bool:
-        """Get list of available payment services."""
-        return self._builder.send_request(f"{_VERSION}/payment/services", parameters or {})
+    async def __aenter__(self) -> AsyncPayment:
+        return self
 
-    def create(self, data: dict[str, Any]) -> dict[str, Any] | bool:
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._builder.close()
+
+    async def services(self, parameters: dict[str, Any] | None = None) -> dict[str, Any] | bool:
+        """Get list of available payment services."""
+        return await self._builder.send_request(f"{_VERSION}/payment/services", parameters or {})
+
+    async def create(self, data: dict[str, Any]) -> dict[str, Any] | bool:
         """
         Create a payment invoice.
 
@@ -52,9 +75,9 @@ class Payment:
             AuthenticationError: If payment_key is invalid.
             APIError: For other API errors.
         """
-        return self._builder.send_request(f"{_VERSION}/payment", data)
+        return await self._builder.send_request(f"{_VERSION}/payment", data)
 
-    def info(self, data: dict[str, Any] | None = None) -> dict[str, Any] | bool:
+    async def info(self, data: dict[str, Any] | None = None) -> dict[str, Any] | bool:
         """
         Get payment info.
 
@@ -68,9 +91,11 @@ class Payment:
             ValidationError: If neither uuid nor order_id provided.
             APIError: If payment not found.
         """
-        return self._builder.send_request(f"{_VERSION}/payment/info", data or {})
+        return await self._builder.send_request(f"{_VERSION}/payment/info", data or {})
 
-    def history(self, cursor: str | None = None, parameters: dict[str, Any] | None = None) -> dict[str, Any] | bool:
+    async def history(
+        self, cursor: str | None = None, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any] | bool:
         """
         Get paginated payment list.
 
@@ -81,20 +106,20 @@ class Payment:
         Returns:
             Dict with items (list of payments) and paginate (cursor info).
         """
-        return self._builder.send_request(
+        return await self._builder.send_request(
             f"{_VERSION}/payment/list", parameters or {}, cursor=cursor
         )
 
-    def balance(self) -> dict[str, Any] | bool:
+    async def balance(self) -> dict[str, Any] | bool:
         """
         Get merchant balance (business and personal wallets).
 
         Returns:
             Dict with balance.merchant and balance.user arrays.
         """
-        return self._builder.send_request(f"{_VERSION}/balance")
+        return await self._builder.send_request(f"{_VERSION}/balance")
 
-    def resend_notification(self, data: dict[str, Any]) -> dict[str, Any] | bool:
+    async def resend_notification(self, data: dict[str, Any]) -> dict[str, Any] | bool:
         """
         Re-send webhook notification for a finalized payment.
 
@@ -108,9 +133,9 @@ class Payment:
         Raises:
             APIError: If payment not found, no url_callback, or resend limit exceeded.
         """
-        return self._builder.send_request(f"{_VERSION}/payment/resend", data)
+        return await self._builder.send_request(f"{_VERSION}/payment/resend", data)
 
-    def create_wallet(self, data: dict[str, Any]) -> dict[str, Any] | bool:
+    async def create_wallet(self, data: dict[str, Any]) -> dict[str, Any] | bool:
         """
         Create a static wallet address.
 
@@ -121,11 +146,11 @@ class Payment:
         Returns:
             Dict with wallet_uuid, uuid, address, network, currency, url.
         """
-        return self._builder.send_request(f"{_VERSION}/wallet", data)
+        return await self._builder.send_request(f"{_VERSION}/wallet", data)
 
     def verify_webhook(self, payload: bytes | str, sign: str) -> bool:
         """
-        Verify incoming webhook signature.
+        Verify incoming webhook signature (sync — no I/O required).
 
         Per API docs: extract sign from body, remove it, re-encode remaining
         data and compare: md5(base64_encode(json_body) + payment_key).
@@ -148,7 +173,6 @@ class Payment:
 
         data.pop("sign", None)
 
-        # PHP json_encode escapes slashes — must match exactly
         body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("/", "\\/")
         encoded = base64.b64encode(body.encode("utf-8")).decode("utf-8")
         expected = hashlib.md5((encoded + self._payment_key).encode("utf-8")).hexdigest()
