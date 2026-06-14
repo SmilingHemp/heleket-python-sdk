@@ -7,6 +7,7 @@
 
 Unofficial Python SDK for the [Heleket](https://heleket.com) payment gateway.
 Covers the full method set of the official PHP SDK with fixes and improvements.
+Supports both **sync** and **async** usage.
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -18,6 +19,7 @@ Covers the full method set of the official PHP SDK with fixes and improvements.
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Django integration](#django-integration)
+- [Async usage](#async-usage)
 - [Payment methods](#payment-methods)
 - [Payout methods](#payout-methods)
 - [Error handling](#error-handling)
@@ -28,11 +30,17 @@ Covers the full method set of the official PHP SDK with fixes and improvements.
 
 ## Installation
 
+**Sync only** (no extra dependencies):
 ```bash
 pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
 ```
 
-Or copy the `heleket/` folder directly into your project — no external dependencies, stdlib only.
+**With async support** (requires `httpx`):
+```bash
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git httpx
+```
+
+Or copy the `heleket/` folder directly into your project.
 
 ---
 
@@ -121,6 +129,77 @@ def heleket_webhook(request):
 
     # your processing logic here
     return HttpResponse("OK")
+```
+
+---
+
+## Async usage
+
+For async Django views use `AsyncClient`. Requires `httpx`.
+
+### Quick start
+
+```python
+from heleket import AsyncClient, HeleketError, ValidationError
+
+async with AsyncClient.payment("your_payment_key", "your_merchant_uuid") as payment:
+    result = await payment.create({
+        "amount": "15",
+        "currency": "USD",
+        "order_id": "order_001",
+    })
+    print(result["url"])
+```
+
+### Async Django view
+
+```python
+# views.py
+import json
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseForbidden
+from django.views.decorators.csrf import csrf_exempt
+from heleket import AsyncClient
+
+async def checkout(request):
+    async with AsyncClient.payment(settings.HELEKET_PAYMENT_KEY, settings.HELEKET_MERCHANT_UUID) as payment:
+        result = await payment.create({
+            "amount": "15",
+            "currency": "USD",
+            "order_id": request.POST["order_id"],
+            "url_callback": "https://your.site/webhook/heleket/",
+        })
+    return JsonResponse({"url": result["url"]})
+
+@csrf_exempt
+async def heleket_webhook(request):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponse(status=400)
+
+    sign = data.get("sign", "")
+    # verify_webhook is sync — no await needed
+    payment = AsyncClient.payment(settings.HELEKET_PAYMENT_KEY, settings.HELEKET_MERCHANT_UUID)
+    if not payment.verify_webhook(request.body, sign):
+        return HttpResponseForbidden("Invalid signature")
+
+    status   = data.get("status")
+    order_id = data.get("order_id")
+    return HttpResponse("OK")
+```
+
+### Without context manager
+
+```python
+payment = AsyncClient.payment(payment_key, merchant_uuid)
+try:
+    result = await payment.create({...})
+finally:
+    await payment.close()
 ```
 
 ---
@@ -353,7 +432,7 @@ You can also whitelist the Heleket webhook IP listed in the official Heleket doc
 ```bash
 # Install dev dependencies
 pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
-pip install pytest
+pip install pytest pytest-asyncio httpx
 
 # Run unit tests (no network required)
 pytest -m "not integration" -v

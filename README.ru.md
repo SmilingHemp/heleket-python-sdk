@@ -7,6 +7,7 @@
 
 Неофициальный Python SDK для платёжного шлюза [Heleket](https://heleket.com).
 Реализует полный набор методов официального PHP SDK с исправлениями и улучшениями.
+Поддерживает **синхронный** и **асинхронный** режим работы.
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -18,6 +19,7 @@
 - [Установка](#установка)
 - [Быстрый старт](#быстрый-старт)
 - [Использование в Django](#использование-в-django)
+- [Асинхронный режим](#асинхронный-режим)
 - [Методы Payment](#методы-payment)
 - [Методы Payout](#методы-payout)
 - [Обработка ошибок](#обработка-ошибок)
@@ -28,11 +30,17 @@
 
 ## Установка
 
+**Только sync** (без внешних зависимостей):
 ```bash
 pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
 ```
 
-Или скопируй папку `heleket/` напрямую в свой проект — внешних зависимостей нет, только стандартная библиотека Python.
+**С async-поддержкой** (требует `httpx`):
+```bash
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git httpx
+```
+
+Или скопируй папку `heleket/` напрямую в свой проект.
 
 ---
 
@@ -121,6 +129,77 @@ def heleket_webhook(request):
 
     # твоя логика обработки
     return HttpResponse("OK")
+```
+
+---
+
+## Асинхронный режим
+
+Для async Django views используй `AsyncClient`. Требует `httpx`.
+
+### Быстрый старт
+
+```python
+from heleket import AsyncClient, HeleketError, ValidationError
+
+async with AsyncClient.payment("ваш_ключ", "ваш_uuid") as payment:
+    result = await payment.create({
+        "amount": "15",
+        "currency": "USD",
+        "order_id": "order_001",
+    })
+    print(result["url"])
+```
+
+### Async Django view
+
+```python
+# views.py
+import json
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from heleket import AsyncClient
+
+async def checkout(request):
+    async with AsyncClient.payment(settings.HELEKET_PAYMENT_KEY, settings.HELEKET_MERCHANT_UUID) as payment:
+        result = await payment.create({
+            "amount": "15",
+            "currency": "USD",
+            "order_id": request.POST["order_id"],
+            "url_callback": "https://your.site/webhook/heleket/",
+        })
+    return JsonResponse({"url": result["url"]})
+
+@csrf_exempt
+async def heleket_webhook(request):
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponse(status=400)
+
+    sign = data.get("sign", "")
+    # verify_webhook — синхронный, await не нужен
+    payment = AsyncClient.payment(settings.HELEKET_PAYMENT_KEY, settings.HELEKET_MERCHANT_UUID)
+    if not payment.verify_webhook(request.body, sign):
+        return HttpResponseForbidden("Invalid signature")
+
+    status   = data.get("status")
+    order_id = data.get("order_id")
+    return HttpResponse("OK")
+```
+
+### Без контекстного менеджера
+
+```python
+payment = AsyncClient.payment(payment_key, merchant_uuid)
+try:
+    result = await payment.create({...})
+finally:
+    await payment.close()
 ```
 
 ---
@@ -353,7 +432,7 @@ if payment.verify_webhook(request.body, sign):
 ```bash
 # Установить зависимости
 pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
-pip install pytest
+pip install pytest pytest-asyncio httpx
 
 # Запустить unit-тесты (без сети)
 pytest -m "not integration" -v
