@@ -29,7 +29,7 @@ Covers the full method set of the official PHP SDK with fixes and improvements.
 ## Installation
 
 ```bash
-pip install -e path/to/python-sdk
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
 ```
 
 Or copy the `heleket/` folder directly into your project — no external dependencies, stdlib only.
@@ -352,7 +352,8 @@ You can also whitelist the Heleket webhook IP listed in the official Heleket doc
 
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
+pip install pytest
 
 # Run unit tests (no network required)
 pytest -m "not integration" -v

@@ -29,7 +29,7 @@
 ## Установка
 
 ```bash
-pip install -e path/to/python-sdk
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
 ```
 
 Или скопируй папку `heleket/` напрямую в свой проект — внешних зависимостей нет, только стандартная библиотека Python.
@@ -352,7 +352,8 @@ if payment.verify_webhook(request.body, sign):
 
 ```bash
 # Установить зависимости
-pip install -e ".[dev]"
+pip install git+https://github.com/SmilingHemp/heleket-python-sdk.git
+pip install pytest
 
 # Запустить unit-тесты (без сети)
 pytest -m "not integration" -v
